@@ -2,6 +2,8 @@
 
 A lightweight note-taking app built with Python and CustomTkinter.
 
+![Notebook screenshot](screenshot.png)
+
 ## Features
 
 - SQLite storage (fast, safe, no file corruption)
