@@ -47,4 +47,4 @@ pyinstaller --onefile --noconsole --icon="icon.ico" --add-data "icon.ico;." --co
 
 ## License
 
-MIT
+AGPL-3.0
