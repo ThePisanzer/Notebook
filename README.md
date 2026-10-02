@@ -4,6 +4,12 @@ A lightweight, keyboard-driven note-taking app for Windows. Built with Python an
 
 ![Notebook screenshot](screenshot.png)
 
+## Feedback
+
+Found a bug or have a suggestion? Please open an issue:
+
+https://github.com/ThePisanzer/Notebook/issues
+
 ## Download
 
 👉 [Download the latest Notebook.exe](https://github.com/ThePisanzer/Notebook/releases/latest)
