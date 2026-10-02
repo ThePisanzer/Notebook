@@ -5,6 +5,7 @@
 
 import json
 import os
+import re
 import sys
 import csv
 import time
@@ -19,6 +20,37 @@ ctk.set_default_color_theme("blue")
 
 FOLDER = "C:\\Notebook"
 DB_FILE = os.path.join(FOLDER, "notes.db")
+SETTINGS_FILE = os.path.join(FOLDER, "settings.json")
+
+
+DEFAULT_SETTINGS = {
+    "appearance_mode": "Dark",
+    "font_size": 11,
+    "text_color": "#ffffff",
+    "selected_color": "#1f6aa5",
+}
+
+
+def load_settings():
+    if os.path.exists(SETTINGS_FILE):
+        try:
+            with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            result = DEFAULT_SETTINGS.copy()
+            result.update(data)
+            return result
+        except Exception:
+            return DEFAULT_SETTINGS.copy()
+    return DEFAULT_SETTINGS.copy()
+
+
+def save_settings(settings):
+    try:
+        os.makedirs(FOLDER, exist_ok=True)
+        with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+            json.dump(settings, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
 
 
 def resource_path(relative):
@@ -118,6 +150,37 @@ def count_temp_notes():
     row = conn.execute("SELECT COUNT(*) AS c FROM notes WHERE permanent = 0").fetchone()
     conn.close()
     return row["c"]
+
+
+#搜索
+
+def search_notes(keyword, use_regex=False):
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT id, content, permanent, updated_at FROM notes ORDER BY updated_at DESC"
+    ).fetchall()
+    conn.close()
+
+    if not keyword or not keyword.strip():
+        return rows
+
+    keyword = keyword.strip()
+    results = []
+
+    if use_regex:
+        try:
+            pattern = re.compile(keyword, re.IGNORECASE)
+        except re.error:
+            return []
+        for row in rows:
+            if pattern.search(row["content"]):
+                results.append(row)
+    else:
+        kw = keyword.lower()
+        for row in rows:
+            if kw in row["content"].lower():
+                results.append(row)
+    return results
 
 
 #导入导出
@@ -334,43 +397,219 @@ class StringDialog(ctk.CTkToplevel):
         self.callback(result)
 
 
+class SettingsDialog(ctk.CTkToplevel):
+    def __init__(self, parent, app, settings):
+        super().__init__(parent)
+        self.app = app
+        self.settings = settings.copy()
+        self._closing = False  #防止关闭时回调还在跑，我就是差点没有发现这个错误被程序给崩了一脸错误
+
+        self.title("Settings")
+        self.geometry("440x460")
+        self.resizable(False, False)
+        self.transient(parent)
+        self.grab_set()
+
+        parent.update_idletasks()
+        x = parent.winfo_x() + (parent.winfo_width() - 440) // 2
+        y = parent.winfo_y() + (parent.winfo_height() - 460) // 2
+        self.geometry(f"+{x}+{y}")
+
+        container = ctk.CTkFrame(self, fg_color="transparent")
+        container.pack(fill="both", expand=True, padx=25, pady=20)
+
+        #外观模式
+        ctk.CTkLabel(
+            container, text="外观模式 / Appearance Mode",
+            font=("Microsoft YaHei", 12), anchor="w"
+        ).pack(fill="x", pady=(0, 4))
+        self.appearance_var = tk.StringVar(value=self.settings["appearance_mode"])
+        ctk.CTkOptionMenu(
+            container,
+            values=["Dark", "Light", "System"],
+            variable=self.appearance_var,
+            font=("Microsoft YaHei", 11),
+            height=32
+        ).pack(fill="x", pady=(0, 14))
+
+        #字体大小
+        ctk.CTkLabel(
+            container, text="字体大小 / Font Size",
+            font=("Microsoft YaHei", 12), anchor="w"
+        ).pack(fill="x", pady=(0, 4))
+
+        font_row = ctk.CTkFrame(container, fg_color="transparent")
+        font_row.pack(fill="x", pady=(0, 14))
+
+        self.font_size_var = tk.IntVar(value=self.settings["font_size"])
+        self.font_size_label = ctk.CTkLabel(
+            font_row, text=str(self.settings["font_size"]),
+            font=("Microsoft YaHei", 12, "bold"),
+            width=40
+        )
+        self.font_size_label.pack(side="right")
+
+        self.font_slider = ctk.CTkSlider(
+            font_row,
+            from_=8, to=24,
+            number_of_steps=16,
+            variable=self.font_size_var,
+            command=self._on_font_change,
+        )
+        self.font_slider.pack(side="left", fill="x", expand=True, padx=(0, 10))
+
+        #文本颜色
+        ctk.CTkLabel(
+            container, text="文本颜色 / Text Color (hex)",
+            font=("Microsoft YaHei", 12), anchor="w"
+        ).pack(fill="x", pady=(0, 4))
+        self.text_color_var = tk.StringVar(value=self.settings["text_color"])
+        ctk.CTkEntry(
+            container, textvariable=self.text_color_var,
+            font=("Microsoft YaHei", 11), height=32
+        ).pack(fill="x", pady=(0, 14))
+
+        #选中高亮色
+        ctk.CTkLabel(
+            container, text="选中高亮色 / Selected Highlight (hex)",
+            font=("Microsoft YaHei", 12), anchor="w"
+        ).pack(fill="x", pady=(0, 4))
+        self.selected_color_var = tk.StringVar(value=self.settings["selected_color"])
+        ctk.CTkEntry(
+            container, textvariable=self.selected_color_var,
+            font=("Microsoft YaHei", 11), height=32
+        ).pack(fill="x", pady=(0, 14))
+
+        #提示
+        ctk.CTkLabel(
+            container,
+            text="提示：颜色格式如 #ffffff / #1f6aa5",
+            font=("Microsoft YaHei", 10),
+            text_color="#888888"
+        ).pack(pady=(0, 10))
+
+        #按钮行
+        btn_row = ctk.CTkFrame(container, fg_color="transparent")
+        btn_row.pack(fill="x", pady=(10, 0))
+
+        ctk.CTkButton(
+            btn_row, text="重置默认", command=self._reset,
+            font=("Microsoft YaHei", 11), width=110, height=34
+        ).pack(side="left")
+
+        ctk.CTkButton(
+            btn_row, text="取消", command=self._close,
+            font=("Microsoft YaHei", 11), width=80, height=34,
+            fg_color="#555555", hover_color="#444444"
+        ).pack(side="right", padx=(8, 0))
+
+        ctk.CTkButton(
+            btn_row, text="应用", command=self._apply,
+            font=("Microsoft YaHei", 11), width=80, height=34
+        ).pack(side="right")
+
+        self.bind("<Escape>", lambda e: self._close())
+        self.protocol("WM_DELETE_WINDOW", self._close)
+        self.focus_set()
+
+    def _on_font_change(self, value):
+        # 关闭过程中直接忽略
+        if self._closing:
+            return
+        try:
+            if not self.winfo_exists():
+                return
+            self.font_size_label.configure(text=str(int(float(value))))
+        except Exception:
+            pass
+
+    def _reset(self):
+        if self._closing:
+            return
+        self.appearance_var.set(DEFAULT_SETTINGS["appearance_mode"])
+        self.font_size_var.set(DEFAULT_SETTINGS["font_size"])
+        try:
+            self.font_size_label.configure(text=str(DEFAULT_SETTINGS["font_size"]))
+        except Exception:
+            pass
+        self.text_color_var.set(DEFAULT_SETTINGS["text_color"])
+        self.selected_color_var.set(DEFAULT_SETTINGS["selected_color"])
+
+    def _apply(self):
+        if self._closing:
+            return
+        self.settings["appearance_mode"] = self.appearance_var.get()
+        self.settings["font_size"] = int(self.font_size_var.get())
+        self.settings["text_color"] = self.text_color_var.get().strip()
+        self.settings["selected_color"] = self.selected_color_var.get().strip()
+        # 先关闭自己，再应用设置（避免设置应用过程中弹窗/刷样式时打到自己）
+        self._close()
+        self.app.apply_settings(self.settings)
+
+    def _close(self):
+        if self._closing:
+            return
+        self._closing = True
+        # 解除滑块 command，防止销毁过程中回调
+        try:
+            self.font_slider.configure(command=lambda v: None)
+        except Exception:
+            pass
+        try:
+            self.destroy()
+        except Exception:
+            pass
+
+
 #GUI
 
 class NotebookApp:
     def __init__(self, root):
         self.root = root
-        self.root.title(f"Notebook - {DB_FILE}")
+        self.root.title("Notebook")
         try:
             self.root.iconbitmap(resource_path("icon.ico"))
         except Exception:
             pass
-        self.root.geometry("1000x580")
-        self.root.minsize(700, 420)
+        self.root.geometry("1000x620")
+        self.root.minsize(700, 460)
 
+        self.settings = load_settings()
+        self._fullscreen = False
+
+        #应用外观模式（在创建控件之前）
+        ctk.set_appearance_mode(self.settings["appearance_mode"])
+
+        #搜索栏
+        search_frame = ctk.CTkFrame(root, fg_color="transparent")
+        search_frame.pack(fill="x", padx=20, pady=(10, 0))
+
+        self.search_var = tk.StringVar()
+        self.search_entry = ctk.CTkEntry(
+            search_frame,
+            placeholder_text="Search... (Ctrl+F)",
+            textvariable=self.search_var,
+            font=("Microsoft YaHei", self.settings["font_size"]),
+            height=32
+        )
+        self.search_entry.pack(side="left", fill="x", expand=True, padx=(0, 10))
+        self.search_var.trace_add("write", lambda *a: self.refresh_list())
+
+        self.regex_var = tk.BooleanVar(value=False)
+        ctk.CTkCheckBox(
+            search_frame, text="Regex",
+            variable=self.regex_var,
+            command=self.refresh_list,
+            font=("Microsoft YaHei", 10),
+            width=70
+        ).pack(side="left")
+
+        #表格
         table_frame = ctk.CTkFrame(root, corner_radius=15)
         table_frame.pack(fill="both", expand=True, padx=20, pady=10)
 
-        style = ttk.Style()
-        style.theme_use("default")
-
-        bg_color = "#2b2b2b" if ctk.get_appearance_mode() == "Dark" else "#f0f0f0"
-        fg_color = "#ffffff" if ctk.get_appearance_mode() == "Dark" else "#000000"
-        selected_color = "#1f6aa5"
-
-        style.configure(
-            "Treeview",
-            background=bg_color,
-            foreground=fg_color,
-            fieldbackground=bg_color,
-            borderwidth=0,
-            rowheight=30,
-            font=("Microsoft YaHei", 10)
-        )
-        style.configure(
-            "Treeview.Heading",
-            font=("Microsoft YaHei", 10, "bold")
-        )
-        style.map("Treeview", background=[("selected", selected_color)])
+        self.style = ttk.Style()
+        self.style.theme_use("default")
 
         columns = ("id", "updated", "type", "preview")
         self.tree = ttk.Treeview(
@@ -396,16 +635,26 @@ class NotebookApp:
         self.tree.pack(side="left", fill="both", expand=True, padx=(10, 0), pady=10)
         scrollbar.pack(side="right", fill="y", padx=(0, 10), pady=10)
 
+        #路径显示标签
+        self.path_label = ctk.CTkLabel(
+            root, text=f"Path: {DB_FILE}",
+            font=("Microsoft YaHei", 12),
+            text_color="#888888"
+        )
+        self.path_label.pack(pady=(0, 5))
+
         #底部灰字快捷键提示
-        hint = ctk.CTkLabel(
+        self.hint = ctk.CTkLabel(
             root,
             text=(
-                "Ctrl+N New   Enter View   F2 Edit   Del Delete   Ctrl+O Path   Ctrl+D Clean   Ctrl+0~9 Select   Ctrl+G Goto   Ctrl+E Export   Ctrl+I Import"
+                "Ctrl+N New   Enter View   F2 Edit   Del Delete   Ctrl+F Search   "
+                "Ctrl+O Path   Ctrl+D Clean   Ctrl+0~9 Select   Ctrl+G Goto   "
+                "Ctrl+E Export   Ctrl+I Import   Ctrl+S Settings   F11 Fullscreen"
             ),
-            font=("Microsoft YaHei", 18),
+            font=("Microsoft YaHei", 11),
             text_color="#aaaaaa"
         )
-        hint.pack(pady=(0, 12))
+        self.hint.pack(pady=(0, 12))
 
         #快捷键绑定，全局
         self.root.bind("<Control-n>", lambda e: self.new_note())
@@ -420,9 +669,15 @@ class NotebookApp:
         self.root.bind("<Control-E>", lambda e: self.export_menu())
         self.root.bind("<Control-i>", lambda e: self.import_menu())
         self.root.bind("<Control-I>", lambda e: self.import_menu())
-        self.root.bind("<Escape>", lambda e: self.root.destroy())
+        self.root.bind("<Control-f>", lambda e: self.focus_search())
+        self.root.bind("<Control-F>", lambda e: self.focus_search())
+        self.root.bind("<Control-s>", lambda e: self.open_settings())
+        self.root.bind("<Control-S>", lambda e: self.open_settings())
+        self.root.bind("<F11>", lambda e: self.toggle_fullscreen())
+        #搜索框有内容就先清空，否则关程序
+        self.root.bind("<Escape>", lambda e: self.on_escape())
 
-        #Ctrl+0~9 选择第 1~10 条
+        #Ctrl+0~9选择第1~10条
         for i in range(10):
             self.root.bind(
                 f"<Control-Key-{i}>",
@@ -435,26 +690,109 @@ class NotebookApp:
         self.tree.bind("<F2>", lambda e: self.edit_note())
         self.tree.bind("<Delete>", lambda e: self.delete_note())
 
+        #首次应用设置（字体、颜色等）
+        self._apply_style_only()
+
         self.refresh_list()
+
+    #设置
+
+    def open_settings(self):
+        SettingsDialog(self.root, self, self.settings)
+
+    def apply_settings(self, new_settings):
+        self.settings = new_settings
+        save_settings(new_settings)
+
+        ctk.set_appearance_mode(new_settings["appearance_mode"])
+
+        #更新搜索框字体
+        try:
+            self.search_entry.configure(font=("Microsoft YaHei", new_settings["font_size"]))
+        except Exception:
+            pass
+
+        #更新风格
+        self._apply_style_only()
+
+        self._info("Success", "Settings applied!")
+
+    def _apply_style_only(self):
+        #根据当前settings更新Treeview样式、路径标签和提示标签的字体。
+        font_size = self.settings["font_size"]
+        is_dark = ctk.get_appearance_mode() == "Dark"
+
+        bg_color = "#2b2b2b" if is_dark else "#f0f0f0"
+        fg_color = self.settings["text_color"]
+        selected_color = self.settings["selected_color"]
+
+        self.style.configure(
+            "Treeview",
+            background=bg_color,
+            foreground=fg_color,
+            fieldbackground=bg_color,
+            borderwidth=0,
+            rowheight=max(28, font_size * 2 + 8),
+            font=("Microsoft YaHei", font_size)
+        )
+        self.style.configure(
+            "Treeview.Heading",
+            font=("Microsoft YaHei", max(9, font_size - 1), "bold")
+        )
+        self.style.map("Treeview", background=[("selected", selected_color)])
+
+        self.path_label.configure(font=("Microsoft YaHei", max(10, font_size)))
+        self.hint.configure(font=("Microsoft YaHei", max(10, font_size - 1)))
+
+    #全屏
+
+    def toggle_fullscreen(self):
+        self._fullscreen = not self._fullscreen
+        self.root.attributes("-fullscreen", self._fullscreen)
+
+    #搜索相关
+
+    def focus_search(self):
+        self.search_entry.focus_set()
+        self.search_entry.select_range(0, "end")
+
+    def on_escape(self):
+        # 如果处于全屏，先退出全屏
+        if self._fullscreen:
+            self._fullscreen = False
+            self.root.attributes("-fullscreen", False)
+            return
+        if self.search_var.get():
+            self.search_var.set("")
+        else:
+            self.root.destroy()
 
     #路径
 
     def change_folder(self):
-        global FOLDER, DB_FILE
+        global FOLDER, DB_FILE, SETTINGS_FILE
 
         folder_selected = filedialog.askdirectory(title="Select save folder")
         if not folder_selected:
+            self._info("Notice", "You didn't select any folder (or clicked Cancel)!")
             return
 
         FOLDER = folder_selected
         DB_FILE = os.path.join(FOLDER, "notes.db")
+        SETTINGS_FILE = os.path.join(FOLDER, "settings.json")
+
         if not os.path.exists(FOLDER):
             os.makedirs(FOLDER, exist_ok=True)
 
         init_db()
         self.refresh_list()
-        self.path_label.config(text=f"Path: {DB_FILE}")
-        self._info("Success", f"Path changed to:\n{FOLDER}")
+
+        self.path_label.configure(text=f"Path: {DB_FILE}")
+
+        self.root.update_idletasks()
+        self.root.update()
+
+        self._info("Success", f"Path changed to:\n{FOLDER}\n\nNew DB File:\n{DB_FILE}")
 
     #列表
 
@@ -462,7 +800,10 @@ class NotebookApp:
         for item in self.tree.get_children():
             self.tree.delete(item)
 
-        for row in list_notes():
+        keyword = self.search_var.get() if hasattr(self, "search_var") else ""
+        use_regex = self.regex_var.get() if hasattr(self, "regex_var") else False
+
+        for row in search_notes(keyword, use_regex):
             preview = row["content"][:40].replace("\n", " ")
             tag = "Perm" if row["permanent"] else "Temp"
             self.tree.insert(
