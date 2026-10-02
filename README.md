@@ -1,8 +1,12 @@
 # Notebook
 
-A lightweight note-taking app built with Python and CustomTkinter.
+A lightweight, keyboard-driven note-taking app for Windows. Built with Python and CustomTkinter. All data stored locally in SQLite — no account, no cloud.
 
 ![Notebook screenshot](screenshot.png)
+
+## Download
+
+👉 [Download the latest Notebook.exe](https://github.com/ThePisanzer/Notebook/releases/latest)
 
 ## Features
 
