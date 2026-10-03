@@ -63,6 +63,11 @@ pyinstaller --onefile --noconsole --icon="icon.ico" --add-data "icon.ico;." --co
 
 ## Changelog
 
+### v1.2.0
+- Fixed import/export
+- Added FormatDialog for choosing JSON / CSV
+- Safer JSON/CSV parsing with error messages
+
 ### v1.1
 - Added real-time search with Regex support (Ctrl+F)
 - Added fullscreen mode (F11)
